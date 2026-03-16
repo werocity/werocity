@@ -2,6 +2,25 @@
 
 import { useState } from "react";
 
+type AnalysisResult = {
+  adresseGeocodee: string;
+  ville: string;
+  codePostal: string;
+  coordonnees: { latitude: number; longitude: number };
+  codeInsee: string;
+  risques: Array<{ libelle_risque?: string; code_risque?: string }>;
+  transactions: { total: number; medianeM2: number | null };
+  score: number;
+  details: {
+    scorePrix: number;
+    scoreDPE: number;
+    scoreTerrain: number;
+    scoreRisques: number;
+    scoreTransactions: number;
+  };
+  verdict: string;
+};
+
 const PROPERTY_TYPES = [
   "Appartement",
   "Maison",
@@ -18,6 +37,9 @@ export default function Home() {
   const [formMode, setFormMode] = useState<"manual" | "cadastre">("manual");
   const [cadastre, setCadastre] = useState({ dept: "", section: "", numero: "" });
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
+  const [isLoading, setIsLoading] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [form, setForm] = useState({
     address: "",
     propertyType: "",
@@ -55,9 +77,40 @@ export default function Home() {
     setStep((s) => Math.max(s - 1, 0));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    alert("Analyse en cours…");
+    setIsLoading(true);
+    setAnalysisError(null);
+    setAnalysisResult(null);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: form.address,
+          surface: form.surface,
+          prix: form.price,
+          dpe: form.dpe,
+          pieces: form.rooms,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAnalysisError(data.error ?? "Une erreur est survenue.");
+      } else {
+        setAnalysisResult(data as AnalysisResult);
+      }
+    } catch {
+      setAnalysisError("Impossible de contacter le serveur. Vérifiez votre connexion.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function handleReset() {
+    setAnalysisResult(null);
+    setAnalysisError(null);
+    setStep(0);
   }
 
   const canProceedStep0 = form.address.trim().length > 3 && !!form.propertyType;
@@ -159,6 +212,173 @@ export default function Home() {
             className="mx-auto max-w-2xl rounded-2xl border p-8 shadow-xl"
             style={{ backgroundColor: "#ffffff", borderColor: "#E8A020" }}
           >
+            {/* ── Loading state ── */}
+            {isLoading && (
+              <div className="flex flex-col items-center gap-6 py-12">
+                <div
+                  className="h-14 w-14 animate-spin rounded-full border-4 border-t-transparent"
+                  style={{ borderColor: "#E8A020", borderTopColor: "transparent" }}
+                />
+                <div className="text-center">
+                  <p className="font-semibold" style={{ color: "#1A1916" }}>Analyse en cours…</p>
+                  <p className="mt-1 text-sm" style={{ color: "#1A1916", opacity: 0.5 }}>
+                    Géocodage · Géorisques · DVF
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Error state ── */}
+            {!isLoading && analysisError && (
+              <div className="flex flex-col items-center gap-6 py-8">
+                <div
+                  className="flex h-14 w-14 items-center justify-center rounded-full text-2xl"
+                  style={{ backgroundColor: "#FEE2E2" }}
+                >
+                  ✕
+                </div>
+                <div className="text-center">
+                  <p className="font-semibold" style={{ color: "#EF4444" }}>{analysisError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="rounded-lg px-6 py-2.5 text-sm font-semibold transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: "#1A1916", color: "#FAFAF7" }}
+                >
+                  Réessayer
+                </button>
+              </div>
+            )}
+
+            {/* ── Results state ── */}
+            {!isLoading && analysisResult && (
+              <div className="space-y-6">
+                {/* Score + verdict */}
+                <div className="text-center">
+                  <div
+                    className="mx-auto mb-3 flex h-24 w-24 items-center justify-center rounded-full text-3xl font-extrabold"
+                    style={{
+                      backgroundColor:
+                        analysisResult.score >= 75
+                          ? "#DCFCE7"
+                          : analysisResult.score >= 55
+                          ? "#FFF8EE"
+                          : analysisResult.score >= 35
+                          ? "#FFEDD5"
+                          : "#FEE2E2",
+                      color:
+                        analysisResult.score >= 75
+                          ? "#16A34A"
+                          : analysisResult.score >= 55
+                          ? "#E8A020"
+                          : analysisResult.score >= 35
+                          ? "#EA580C"
+                          : "#DC2626",
+                    }}
+                  >
+                    {analysisResult.score}
+                  </div>
+                  <p className="text-lg font-bold" style={{ color: "#1A1916" }}>
+                    {analysisResult.verdict}
+                  </p>
+                  <p className="mt-1 text-sm" style={{ color: "#1A1916", opacity: 0.55 }}>
+                    {analysisResult.adresseGeocodee}
+                  </p>
+                </div>
+
+                {/* Metrics grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Prix médian DVF */}
+                  <div
+                    className="rounded-xl p-4"
+                    style={{ backgroundColor: "#F8F9FA", border: "1px solid #E5E7EB" }}
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#9CA3AF" }}>
+                      Prix médian DVF
+                    </p>
+                    <p className="mt-1 text-xl font-extrabold" style={{ color: "#1A1916" }}>
+                      {analysisResult.transactions.medianeM2
+                        ? `${analysisResult.transactions.medianeM2.toLocaleString("fr-FR")} €/m²`
+                        : "N/D"}
+                    </p>
+                    <p className="text-xs" style={{ color: "#1A1916", opacity: 0.5 }}>
+                      sur {analysisResult.transactions.total} vente
+                      {analysisResult.transactions.total !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+
+                  {/* Risques */}
+                  <div
+                    className="rounded-xl p-4"
+                    style={{ backgroundColor: "#F8F9FA", border: "1px solid #E5E7EB" }}
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#9CA3AF" }}>
+                      Risques naturels
+                    </p>
+                    <p className="mt-1 text-xl font-extrabold" style={{ color: "#1A1916" }}>
+                      {analysisResult.risques.length}
+                    </p>
+                    <p className="text-xs" style={{ color: "#1A1916", opacity: 0.5 }}>
+                      {analysisResult.risques.length === 0
+                        ? "Aucun risque détecté"
+                        : analysisResult.risques
+                            .slice(0, 2)
+                            .map((r) => r.libelle_risque ?? "Risque")
+                            .join(", ")}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Score breakdown */}
+                <div
+                  className="rounded-xl p-4 space-y-2"
+                  style={{ backgroundColor: "#FFF8EE", border: "1px solid #E8A020" }}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#E8A020" }}>
+                    Détail du score
+                  </p>
+                  {[
+                    { label: "Prix vs marché DVF", val: analysisResult.details.scorePrix, max: 20 },
+                    { label: "DPE", val: analysisResult.details.scoreDPE, max: 15 },
+                    { label: "Surface / terrain", val: analysisResult.details.scoreTerrain, max: 25 },
+                    { label: "Risques", val: analysisResult.details.scoreRisques, max: 20 },
+                    { label: "Liquidité marché", val: analysisResult.details.scoreTransactions, max: 20 },
+                  ].map(({ label, val, max }) => (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="w-36 text-left text-xs" style={{ color: "#1A1916", opacity: 0.7 }}>
+                        {label}
+                      </span>
+                      <div className="flex-1 rounded-full h-2 overflow-hidden" style={{ backgroundColor: "#E5E7EB" }}>
+                        <div
+                          className="h-2 rounded-full transition-all"
+                          style={{
+                            width: `${(val / max) * 100}%`,
+                            backgroundColor: "#E8A020",
+                          }}
+                        />
+                      </div>
+                      <span className="w-10 text-right text-xs font-semibold" style={{ color: "#1A1916" }}>
+                        {val}/{max}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="w-full rounded-lg border py-3 text-sm font-semibold transition-colors hover:bg-gray-50"
+                  style={{ borderColor: "#E5E7EB", color: "#1A1916" }}
+                >
+                  Nouvelle analyse
+                </button>
+              </div>
+            )}
+
+            {/* ── Form (hidden during loading/results) ── */}
+            {!isLoading && !analysisResult && !analysisError && (
+              <>
             {/* Mode toggle */}
             <div
               className="mb-8 flex rounded-xl p-1"
@@ -624,6 +844,8 @@ export default function Home() {
                 )}
               </div>
             </form>
+              </>
+            )}
               </>
             )}
           </div>
