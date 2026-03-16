@@ -60,14 +60,14 @@ export async function POST(req: NextRequest) {
     const [longitude, latitude] = feat.geometry.coordinates;
     const { label: adresseGeocodee, city, postcode, citycode } = feat.properties;
 
-    // ── 2. Risques + DVF en parallèle ─────────────────────────────────────────
-    const [risquesRes, dvfRes] = await Promise.allSettled([
+    // ── 2. Risques + DVF primaire en parallèle ───────────────────────────────
+    const [risquesRes, dvfPrimaryRes] = await Promise.allSettled([
       fetch(
         `https://georisques.gouv.fr/api/v1/resultats_par_commune?code_insee=${citycode}`,
         { next: { revalidate: 86400 } }
       ),
       fetch(
-        `https://api.cquest.org/dvf?code_commune=${citycode}&nature_mutation=Vente`,
+        `https://api.cquest.org/dvf?code_commune=${citycode}&nat_mutation=Vente`,
         { next: { revalidate: 3600 } }
       ),
     ]);
@@ -84,11 +84,27 @@ export async function POST(req: NextRequest) {
       risquesActifs = liste.filter((r) => r.present === true);
     }
 
-    // DVF
+    // DVF primaire
     let transactions: DvfTransaction[] = [];
-    if (dvfRes.status === "fulfilled" && dvfRes.value.ok) {
-      const raw = await dvfRes.value.json();
+    if (dvfPrimaryRes.status === "fulfilled" && dvfPrimaryRes.value.ok) {
+      const raw = await dvfPrimaryRes.value.json();
       transactions = Array.isArray(raw) ? raw : (raw.resultats ?? raw.features ?? []);
+    }
+
+    // DVF fallback si aucune transaction trouvée
+    if (transactions.length === 0) {
+      try {
+        const dvfFallback = await fetch(
+          `https://dvf.data.gouv.fr/api/dvf/rechercher/?code_postal=${postcode}`,
+          { next: { revalidate: 3600 } }
+        );
+        if (dvfFallback.ok) {
+          const raw = await dvfFallback.json();
+          transactions = Array.isArray(raw)
+            ? raw
+            : (raw.resultats ?? raw.features ?? raw.results ?? []);
+        }
+      } catch { /* ignore */ }
     }
 
     // ── 3. Calcul du score ────────────────────────────────────────────────────
