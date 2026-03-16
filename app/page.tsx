@@ -9,7 +9,7 @@ type AnalysisResult = {
   coordonnees: { latitude: number; longitude: number };
   codeInsee: string;
   risques: Array<{ libelle_risque?: string; code_risque?: string }>;
-  transactions: { total: number; medianeM2: number | null };
+  transactions: { total: number; medianeM2: number | null; source: string; simule: boolean };
   score: number;
   details: {
     scorePrix: number;
@@ -305,6 +305,9 @@ export default function Home() {
                     <p className="text-xs" style={{ color: "#1A1916", opacity: 0.5 }}>
                       sur {analysisResult.transactions.total} vente
                       {analysisResult.transactions.total !== 1 ? "s" : ""}
+                    </p>
+                    <p className="mt-1 text-xs" style={{ color: analysisResult.transactions.simule ? "#E8A020" : "#9CA3AF" }}>
+                      {analysisResult.transactions.source}
                     </p>
                   </div>
 
